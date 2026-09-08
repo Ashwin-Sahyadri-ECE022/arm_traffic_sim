@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cortex-M3 Traffic Control Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-brand">
+    <span class="chip-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="22" height="22"><rect x="6" y="6" width="12" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9 2v3M12 2v3M15 2v3M9 19v3M12 19v3M15 19v3M2 9h3M2 12h3M2 15h3M19 9h3M19 12h3M19 15h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+    </span>
+    <div>
+      <h1>Cortex&#8209;M3 Traffic Control Simulator</h1>
+      <p class="topbar-sub">A virtual ARM Cortex&#8209;M3 drives a real intersection through memory&#8209;mapped GPIO</p>
+    </div>
+  </div>
+  <div class="topbar-status">
+    <div class="status-pill" id="cpuStatusPill">
+      <span class="status-dot" id="cpuStatusDot"></span>
+      <span id="cpuStatusText">CPU RUNNING</span>
+    </div>
+    <div class="status-pill ghost">
+      <span id="cycleCounter">0</span>&nbsp;cycles
+    </div>
+  </div>
+</header>
+
+<main class="layout">
+
+  <!-- ============ LEFT: TRAFFIC INTERSECTION ============ -->
+  <section class="panel traffic-panel">
+    <div class="panel-head">
+      <h2><span class="panel-icon">&#128678;</span> Traffic Intersection</h2>
+      <div class="mode-switch" role="group" aria-label="Traffic control mode">
+        <button class="mode-btn active" data-mode="normal">Normal</button>
+        <button class="mode-btn" data-mode="adaptive">Adaptive</button>
+        <button class="mode-btn" data-mode="manual">Manual</button>
+      </div>
+    </div>
+
+    <div class="scene-wrap">
+      <svg id="scene" viewBox="0 0 600 600" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <radialGradient id="skyGrad" cx="50%" cy="20%" r="90%">
+            <stop offset="0%" stop-color="#1a2436"/>
+            <stop offset="100%" stop-color="#0a0e14"/>
+          </radialGradient>
+          <linearGradient id="roadGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#2a313d"/>
+            <stop offset="100%" stop-color="#1c222c"/>
+          </linearGradient>
+          <filter id="softGlow" x="-60%" y="-60%" width="220%" height="220%">
+            <feGaussianBlur stdDeviation="4" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+
+        <rect x="0" y="0" width="600" height="600" fill="url(#skyGrad)"/>
+
+        <!-- roads -->
+        <rect x="250" y="0" width="100" height="600" fill="url(#roadGrad)"/>
+        <rect x="0" y="250" width="600" height="100" fill="url(#roadGrad)"/>
+        <!-- lane dashes -->
+        <g stroke="#4a5568" stroke-width="2" stroke-dasharray="10 10" opacity="0.5">
+          <line x1="300" y1="0" x2="300" y2="250"/>
+          <line x1="300" y1="350" x2="300" y2="600"/>
+          <line x1="0" y1="300" x2="250" y2="300"/>
+          <line x1="350" y1="300" x2="600" y2="300"/>
+        </g>
+        <!-- intersection box -->
+        <rect x="250" y="250" width="100" height="100" fill="#232a35"/>
+
+        <!-- stop lines -->
+        <rect x="252" y="234" width="46" height="5" fill="#e7edf3" opacity="0.85"/>
+        <rect x="362" y="252" width="5" height="46" fill="#e7edf3" opacity="0.85"/>
+
+        <!-- direction labels -->
+        <text x="272" y="24" class="dir-label">N</text>
+        <text x="565" y="278" class="dir-label">E</text>
+
+        <!-- traffic light housings -->
+        <g id="lightNS" transform="translate(212,196)">
+          <rect x="0" y="0" width="26" height="70" rx="6" fill="#12161d" stroke="#2a3442" stroke-width="1.5"/>
+          <circle id="ns-red" class="bulb" cx="13" cy="16" r="8" fill="#3a1418"/>
+          <circle id="ns-yellow" class="bulb" cx="13" cy="35" r="8" fill="#3a2e10"/>
+          <circle id="ns-green" class="bulb" cx="13" cy="54" r="8" fill="#0f2a1e"/>
+        </g>
+        <g id="lightEW" transform="translate(362,330) rotate(90)">
+          <rect x="0" y="0" width="26" height="70" rx="6" fill="#12161d" stroke="#2a3442" stroke-width="1.5"/>
+          <circle id="ew-red" class="bulb" cx="13" cy="16" r="8" fill="#3a1418"/>
+          <circle id="ew-yellow" class="bulb" cx="13" cy="35" r="8" fill="#3a2e10"/>
+          <circle id="ew-green" class="bulb" cx="13" cy="54" r="8" fill="#0f2a1e"/>
+        </g>
+
+        <!-- vehicles injected here -->
+        <g id="vehicleLayer"></g>
+      </svg>
+
+      <div class="scene-readout">
+        <div class="readout-chip"><span class="readout-label">N&#8594;S queue</span><span id="nsQueueCount">0</span></div>
+        <div class="readout-chip"><span class="readout-label">E&#8594;W queue</span><span id="ewQueueCount">0</span></div>
+      </div>
+    </div>
+
+    <div class="scene-controls">
+      <div class="control-group" id="manualControls" hidden>
+        <span class="control-label">Manual command</span>
+        <button class="ghost-btn" id="manualNS">Set N&#8594;S green</button>
+        <button class="ghost-btn" id="manualEW">Set E&#8594;W green</button>
+      </div>
+      <div class="control-group">
+        <span class="control-label">Emergency spawn</span>
+        <button class="emg-btn" id="spawnAmbNS">&#128657; Ambulance (N&#8594;S)</button>
+        <button class="emg-btn" id="spawnAmbEW">&#128658; Firetruck (E&#8594;W)</button>
+      </div>
+      <div class="control-group">
+        <span class="control-label">Traffic density</span>
+        <input type="range" id="spawnRateSlider" min="0" max="100" value="45">
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ RIGHT: CORTEX-M3 ============ -->
+  <section class="panel cortex-panel">
+    <div class="panel-head">
+      <h2><span class="panel-icon">&#9881;&#65039;</span> Cortex&#8209;M3 Controller</h2>
+      <div class="tab-switch" role="group" aria-label="Cortex view">
+        <button class="tab-btn active" data-tab="console">Console</button>
+        <button class="tab-btn" data-tab="arch">Internal Architecture</button>
+      </div>
+    </div>
+
+    <!-- CONSOLE TAB -->
+    <div class="tab-view" id="tabConsole">
+      <div class="console-grid">
+
+        <div class="card">
+          <h3>Registers</h3>
+          <div class="reg-grid" id="regGrid"></div>
+        </div>
+
+        <div class="card">
+          <h3>Core</h3>
+          <div class="kv-list">
+            <div class="kv"><span>PC</span><span id="valPC" class="mono">0</span></div>
+            <div class="kv"><span>SP (R13)</span><span id="valSP" class="mono">0x1000</span></div>
+            <div class="kv"><span>LR (R14)</span><span id="valLR" class="mono">0</span></div>
+            <div class="kv"><span>xPSR flags</span><span id="valFlags" class="mono">Z:0 N:0</span></div>
+            <div class="kv"><span>Instructions executed</span><span id="valInstrCount" class="mono">0</span></div>
+            <div class="kv"><span>Active thread</span><span id="valThread" class="mono">main</span></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Current instruction</h3>
+          <div class="instr-line" id="currentInstr"><span class="instr-op">&mdash;</span></div>
+          <div class="instr-hint">Fetch &#8594; Decode &#8594; Execute &#8594; Writeback, one instruction per pipeline tick.</div>
+        </div>
+
+        <div class="card">
+          <h3>Virtual GPIO <span class="addr-tag">0x4000_0000</span></h3>
+          <div class="gpio-grid">
+            <div class="gpio-pin"><span class="led" id="gpio-NS_RED"></span><span>NS_RED</span></div>
+            <div class="gpio-pin"><span class="led" id="gpio-NS_YELLOW"></span><span>NS_YELLOW</span></div>
+            <div class="gpio-pin"><span class="led" id="gpio-NS_GREEN"></span><span>NS_GREEN</span></div>
+            <div class="gpio-pin"><span class="led" id="gpio-EW_RED"></span><span>EW_RED</span></div>
+            <div class="gpio-pin"><span class="led" id="gpio-EW_YELLOW"></span><span>EW_YELLOW</span></div>
+            <div class="gpio-pin"><span class="led" id="gpio-EW_GREEN"></span><span>EW_GREEN</span></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Timer</h3>
+          <div class="kv-list">
+            <div class="kv"><span>Remaining</span><span id="valTimerRem" class="mono">0.0s</span></div>
+            <div class="kv"><span>Reload value</span><span id="valTimerLoad" class="mono">0s</span></div>
+          </div>
+          <div class="timer-bar"><div class="timer-bar-fill" id="timerBarFill"></div></div>
+        </div>
+
+        <div class="card">
+          <h3>NVIC / Interrupts</h3>
+          <div class="nvic-row">
+            <span class="int-badge" id="intTimerBadge">TIMER</span>
+            <span class="int-badge" id="intEmgBadge">EMERGENCY</span>
+          </div>
+          <div class="kv-list">
+            <div class="kv"><span>State</span><span id="valNvicState" class="mono">idle</span></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ARCHITECTURE TAB -->
+    <div class="tab-view" id="tabArch" hidden>
+      <div class="arch-controls">
+        <button class="ghost-btn" id="archPlayPause">&#10074;&#10074; Pause lockstep</button>
+        <button class="ghost-btn" id="archStep" disabled>&#9654; Step once</button>
+        <span class="arch-hint" id="archHint">Watching the live controller loop in real time.</span>
+      </div>
+      <svg id="archSvg" viewBox="0 0 640 480" preserveAspectRatio="xMidYMid meet">
+        <!-- populated by script.js -->
+      </svg>
+    </div>
+
+  </section>
+
+</main>
+
+<footer class="controlbar">
+  <button class="play-btn" id="globalPlayPause">&#10074;&#10074; Pause</button>
+  <div class="speed-control">
+    <span>Speed</span>
+    <input type="range" id="speedSlider" min="0.25" max="3" step="0.25" value="1">
+    <span id="speedLabel">1.0&times;</span>
+  </div>
+  <div class="footer-note">Traffic lights only change when the Cortex&#8209;M3 executes an <span class="mono">STR</span> to the GPIO address range &mdash; the browser never sets them directly.</div>
+</footer>
+
+<script src="script.js"></script>
+</body>
+</html>
