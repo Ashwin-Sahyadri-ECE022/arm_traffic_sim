@@ -377,17 +377,98 @@ class CortexM3 {
    memory (via cortex.readMem). Writes vehicle counts / emergency flags
    into the CPU's sensor memory region - it never touches GPIO itself.
 ------------------------------------------------------------------------ */
+// stopLine is set with a visible margin BEFORE the painted stop-line bar in
+// index.html (which sits at y 234-239 for N, x 362-367 for E) so a stopped
+// vehicle's front edge is clearly behind the line, never drawn on top of it.
 const LANES = {
-  N: { axis:'y', sign:+1, spawn:-40, stopLine:236, exit:378, limit:650 },
-  E: { axis:'x', sign:-1, spawn:640, stopLine:364, exit:222, limit:-40 },
+  N: { axis:'y', sign:+1, spawn:-40, stopLine:228, exit:380, limit:650 },
+  E: { axis:'x', sign:-1, spawn:640, stopLine:372, exit:220, limit:-40 },
 };
+
+/* Each vehicle type is defined by its real-world-ish footprint (length =
+   along the direction of travel, w = across the lane) plus a "blueprint":
+   a list of simple shapes (rect/circle) drawn in a local coordinate system
+   where d=0 is the FRONT of the vehicle and d=length is the REAR, and a=0
+   is the centreline of the lane. This local system is then mapped onto
+   whichever screen axis the vehicle is actually travelling along, so one
+   blueprint works for both the N lane (vertical) and the E lane
+   (horizontal) with no separate art needed per direction. */
+function rect(d0,d1,a0,a1,fill,rx=1){ return { shape:'rect', d0,d1,a0,a1, fill, rx }; }
+function circ(d,a,r,fill){ return { shape:'circle', d,a, r, fill }; }
+
+function carBlueprint(L, W, body){
+  const hw = W/2;
+  return [
+    rect(0, L, -hw, hw, body, 4),
+    rect(L*0.12, L*0.38, -hw+1.5, hw-1.5, '#bfe3ff', 2),   // windshield
+    rect(L*0.62, L*0.85, -hw+1.5, hw-1.5, '#8fb8d8', 2),   // rear windshield
+    rect(L*0.15, L*0.3, -hw-1.2, -hw+0.6, '#14161a'),       // wheel FL
+    rect(L*0.15, L*0.3, hw-0.6, hw+1.2, '#14161a'),         // wheel FR
+    rect(L*0.68, L*0.83, -hw-1.2, -hw+0.6, '#14161a'),      // wheel RL
+    rect(L*0.68, L*0.83, hw-0.6, hw+1.2, '#14161a'),        // wheel RR
+    circ(1.5, -hw*0.55, 1.1, '#fff4b8'),                     // headlight L
+    circ(1.5, hw*0.55, 1.1, '#fff4b8'),                      // headlight R
+    circ(L-1.2, -hw*0.55, 1, '#ff5a5a'),                     // taillight L
+    circ(L-1.2, hw*0.55, 1, '#ff5a5a'),                      // taillight R
+  ];
+}
+function bikeBlueprint(L, W, body){
+  return [
+    circ(2.2, 0, 2.4, '#1a1d22'),                            // front wheel
+    circ(L-2.2, 0, 2.4, '#1a1d22'),                          // rear wheel
+    rect(L*0.28, L*0.72, -1.1, 1.1, body, 2),                 // frame/body
+    circ(L*0.42, 0, 2.6, '#e7c9a0'),                          // rider
+    circ(1.6, 0, 0.9, '#fff4b8'),                             // headlight
+  ];
+}
+function busTruckBlueprint(L, W, body, cabColor, isTruck){
+  const hw = W/2;
+  const shapes = [ rect(0, L, -hw, hw, body, 3) ];
+  if (isTruck){
+    shapes.push(rect(0, L*0.22, -hw+0.5, hw-0.5, cabColor, 2));           // cab up front
+    shapes.push(rect(L*0.06, L*0.18, -hw+1.5, hw-1.5, '#bfe3ff', 1.5));   // cab windshield
+  } else {
+    // bus: row of passenger windows
+    for (let i=0;i<4;i++){
+      const d0 = L*(0.14 + i*0.19), d1 = d0 + L*0.13;
+      shapes.push(rect(d0, d1, -hw+1.8, hw-1.8, '#bfe3ff', 1.5));
+    }
+  }
+  shapes.push(rect(L*0.1, L*0.24, -hw-1.4, -hw+0.6, '#14161a'));
+  shapes.push(rect(L*0.1, L*0.24, hw-0.6, hw+1.4, '#14161a'));
+  shapes.push(rect(L*0.72, L*0.86, -hw-1.4, -hw+0.6, '#14161a'));
+  shapes.push(rect(L*0.72, L*0.86, hw-0.6, hw+1.4, '#14161a'));
+  shapes.push(circ(1.5, -hw*0.6, 1.2, '#fff4b8'));
+  shapes.push(circ(1.5, hw*0.6, 1.2, '#fff4b8'));
+  shapes.push(circ(L-1.3, -hw*0.6, 1.1, '#ff5a5a'));
+  shapes.push(circ(L-1.3, hw*0.6, 1.1, '#ff5a5a'));
+  return shapes;
+}
+function ambulanceBlueprint(L, W){
+  const base = carBlueprint(L, W, '#f4f6f8');
+  const hw = W/2;
+  return [
+    ...base,
+    rect(L*0.42, L*0.48, -hw*0.5, hw*0.5, '#ff4d4d'),          // cross vertical
+    rect(L*0.38, L*0.52, -hw*0.18, hw*0.18, '#ff4d4d'),        // cross horizontal
+  ];
+}
+function firetruckBlueprint(L, W){
+  const base = busTruckBlueprint(L, W, '#e63c3c', '#c92e2e', true);
+  const hw = W/2;
+  return [
+    ...base,
+    rect(L*0.3, L*0.95, -hw*0.15, hw*0.15, '#ffd23f'),          // ladder rail
+  ];
+}
+
 const VEHICLE_TYPES = {
-  car:      { length:26, speed:78, w:16, h:26, color:'#5b8dd9' },
-  bike:     { length:14, speed:70, w:9,  h:14, color:'#e0a83c' },
-  bus:      { length:42, speed:58, w:18, h:42, color:'#5bd98f' },
-  truck:    { length:40, speed:55, w:19, h:40, color:'#c96ae0' },
-  ambulance:{ length:30, speed:95, w:17, h:30, color:'#f2f2f2' },
-  firetruck:{ length:38, speed:90, w:19, h:38, color:'#ff5a5a' },
+  car:      { length:27, w:14, speed:78, blueprint: (L,W)=>carBlueprint(L,W,'#5b8dd9') },
+  bike:     { length:14, w:7,  speed:70, blueprint: (L,W)=>bikeBlueprint(L,W,'#e0a83c') },
+  bus:      { length:44, w:17, speed:56, blueprint: (L,W)=>busTruckBlueprint(L,W,'#4fbf7a','#3a9860',false) },
+  truck:    { length:40, w:18, speed:54, blueprint: (L,W)=>busTruckBlueprint(L,W,'#b06ad9','#8a4bb0',true) },
+  ambulance:{ length:29, w:15, speed:95, blueprint: (L,W)=>ambulanceBlueprint(L,W), emergency:true },
+  firetruck:{ length:40, w:18, speed:88, blueprint: (L,W)=>firetruckBlueprint(L,W), emergency:true },
 };
 const NORMAL_TYPES = ['car','car','car','bike','bus','truck'];
 
@@ -440,7 +521,13 @@ class TrafficSim {
         .sort((a,b) => cfg.sign>0 ? b.pos - a.pos : a.pos - b.pos);
 
       list.forEach((v, idx) => {
-        const pastStopLine = cfg.sign>0 ? v.pos >= cfg.stopLine : v.pos <= cfg.stopLine;
+        // Strict inequality matters here: a vehicle held exactly AT the stop
+        // line (clamped there while the light is red) must NOT be mistaken
+        // for a vehicle that has already legitimately crossed it. Once it
+        // truly crosses (position moves past the line while green), it stays
+        // "crossed" from then on so it can clear the intersection even if
+        // the light changes again mid-crossing.
+        const pastStopLine = cfg.sign>0 ? v.pos > cfg.stopLine : v.pos < cfg.stopLine;
         let maxPos = cfg.sign>0 ? Infinity : -Infinity;
         if (!pastStopLine && !lightGreen && !v.emergency){
           maxPos = cfg.stopLine;
@@ -569,11 +656,42 @@ function renderConsole(){
   document.getElementById('cycleCounter').textContent = cortex.cycles;
 }
 
-/* ---- traffic scene rendering ---- */
+/* ---- traffic scene rendering ----
+   Each vehicle's blueprint is built ONCE, in a local coordinate system
+   (x_local = d = distance from front, y_local = a = lane-offset). Every
+   frame we then just rewrite one `transform` attribute on the vehicle's
+   group - no per-shape re-positioning - which is both cheap and keeps
+   the front/rear-specific detail (headlights, cab, cross, ladder) always
+   pointing the right way:
+     E lane (moving left):   transform = translate(pos, laneCenterE)
+     N lane (moving down):   transform = translate(laneCenterN, pos) rotate(-90)
+   Rotating -90 maps local (d, a) -> world offset (a, -d), which is
+   exactly "front at pos, rear trailing above it" for the N lane.        */
+const LANE_CENTER = { N: 275, E: 275 };
 const vehicleLayer = document.getElementById('vehicleLayer');
 const vehicleEls = {};
 
-function bulbClass(base){ return `bulb ${base}`; }
+function shapeToSvg(s){
+  if (s.shape === 'rect'){
+    return svgEl2('rect', { x: s.d0, y: s.a0, width: s.d1-s.d0, height: s.a1-s.a0, rx: s.rx||1, fill: s.fill });
+  }
+  return svgEl2('circle', { cx: s.d, cy: s.a, r: s.r, fill: s.fill });
+}
+function svgEl2(tag, attrs){
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  Object.entries(attrs).forEach(([k,v]) => el.setAttribute(k, v));
+  return el;
+}
+function buildVehicleGroup(type){
+  const spec = VEHICLE_TYPES[type];
+  const g = svgEl2('g', { class:'vehicle-shape' });
+  spec.blueprint(spec.length, spec.w).forEach(s => g.appendChild(shapeToSvg(s)));
+  if (spec.emergency){
+    const bar = svgEl2('rect', { x:0, y:-spec.w/2+1, width:2.6, height:spec.w-2, rx:0.6, class:'vehicle-emg', fill:'#49c8ff' });
+    g.appendChild(bar);
+  }
+  return g;
+}
 
 function renderScene(queues){
   document.getElementById('nsQueueCount').textContent = queues.nsQueue;
@@ -593,40 +711,16 @@ function renderScene(queues){
   const liveIds = new Set();
   traffic.vehicles.forEach(v => {
     liveIds.add(v.id);
-    const spec = VEHICLE_TYPES[v.type];
     let el = vehicleEls[v.id];
     if (!el){
-      el = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-      const body = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-      body.setAttribute('rx', 3);
-      body.setAttribute('class', 'vehicle-body');
-      body.setAttribute('fill', spec.color);
-      el.appendChild(body);
-      if (v.emergency){
-        const bar = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        bar.setAttribute('class', 'vehicle-emg');
-        bar.setAttribute('fill', '#49c8ff');
-        el.appendChild(bar);
-      }
+      el = buildVehicleGroup(v.type);
       vehicleLayer.appendChild(el);
       vehicleEls[v.id] = el;
     }
-    const body = el.querySelector('.vehicle-body');
-    const laneCenterN = 275, laneCenterE = 275;
     if (v.dir === 'N'){
-      body.setAttribute('x', laneCenterN - spec.w/2);
-      body.setAttribute('y', v.pos - spec.length);
-      body.setAttribute('width', spec.w);
-      body.setAttribute('height', spec.length);
-      const bar = el.querySelector('.vehicle-emg');
-      if (bar){ bar.setAttribute('x', laneCenterN - spec.w/2 + 2); bar.setAttribute('y', v.pos - spec.length + 3); bar.setAttribute('width', spec.w-4); bar.setAttribute('height', 4); }
+      el.setAttribute('transform', `translate(${LANE_CENTER.N},${v.pos}) rotate(-90)`);
     } else {
-      body.setAttribute('x', v.pos);
-      body.setAttribute('y', laneCenterE - spec.w/2);
-      body.setAttribute('width', spec.length);
-      body.setAttribute('height', spec.w);
-      const bar = el.querySelector('.vehicle-emg');
-      if (bar){ bar.setAttribute('x', v.pos + 2); bar.setAttribute('y', laneCenterE - spec.w/2 + 2); bar.setAttribute('width', 4); bar.setAttribute('height', spec.w-4); }
+      el.setAttribute('transform', `translate(${v.pos},${LANE_CENTER.E})`);
     }
   });
   Object.keys(vehicleEls).forEach(id => {
@@ -794,6 +888,13 @@ document.getElementById('manualEW').addEventListener('click', () => {
 
 document.getElementById('spawnAmbNS').addEventListener('click', () => traffic.spawn('N', 'ambulance'));
 document.getElementById('spawnAmbEW').addEventListener('click', () => traffic.spawn('E', 'firetruck'));
+
+document.querySelectorAll('.lane-spawn-row').forEach(row => {
+  const lane = row.dataset.lane;
+  row.querySelectorAll('.veh-btn').forEach(btn => {
+    btn.addEventListener('click', () => traffic.spawn(lane, btn.dataset.type));
+  });
+});
 
 document.getElementById('spawnRateSlider').addEventListener('input', (e) => {
   traffic.spawnRate = Number(e.target.value) / 100;
