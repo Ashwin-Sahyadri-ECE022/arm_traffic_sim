@@ -139,7 +139,7 @@ html,body{
 .bulb.on-yellow{ fill: var(--amber); filter: drop-shadow(0 0 7px var(--amber)); }
 .bulb.on-green{ fill: var(--green); filter: drop-shadow(0 0 7px var(--green)); }
 
-.vehicle-body{ transition: fill .2s; }
+.vehicle-shape rect, .vehicle-shape circle{ stroke: rgba(0,0,0,0.35); stroke-width: 0.4; }
 .vehicle-emg{ animation: emg-flash 0.5s steps(2) infinite; }
 @keyframes emg-flash{ 0%{ filter: drop-shadow(0 0 4px #ff4d5e);} 50%{ filter: drop-shadow(0 0 6px #49c8ff);} }
 
@@ -173,6 +173,19 @@ html,body{
 .ghost-btn:hover{ border-color: var(--cyan); }
 .ghost-btn:active{ transform: scale(0.97); }
 .ghost-btn:disabled{ opacity:.4; cursor:not-allowed; }
+
+.lane-spawn-group{ min-width: 190px; }
+.lane-spawn-row{ display:flex; gap:6px; }
+.veh-btn{
+  display:flex; flex-direction:column; align-items:center; gap:2px;
+  background: var(--panel-bg-raised); color: var(--text-dim);
+  border: 1px solid var(--border); border-radius: 7px;
+  padding: 6px 8px; font-size:16px; cursor:pointer;
+  transition: border-color .15s, transform .1s, color .15s;
+}
+.veh-btn span{ font-size:9.5px; font-family: var(--font-ui); font-weight:600; }
+.veh-btn:hover{ border-color: var(--cyan); color: var(--text); }
+.veh-btn:active{ transform: scale(0.94); }
 
 .emg-btn{
   background: var(--red-dim); color: #ffb3ba;
